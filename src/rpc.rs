@@ -89,6 +89,7 @@ impl Result {
 // NOCOM(#sirver): check in this file what needs to be derived. seems too much.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Call {
+    // NOCOM(#sirver): rename to selector
     pub function: String,
     pub context: String,
     pub args: serde_json::Value,

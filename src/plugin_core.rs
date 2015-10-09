@@ -24,23 +24,24 @@ impl CorePlugin {
         }
     }
 
-    pub fn call(&self, caller: ipc_bridge::ClientId, rpc_call: &rpc::Call) -> rpc::Result {
-        match &rpc_call.function as &str {
+    pub fn call(&self, caller: ipc_bridge::ClientId, rpc_call: rpc::Call) -> Option<rpc::Result> {
+        match &*rpc_call.function as &str {
             "core.exit" => {
                 self.commands.send(server::Command::Quit).unwrap();
-                rpc::Result::success(())
+                Some(rpc::Result::success(()))
             },
-            // NOCOM(#sirver): These args can be pulled out into Serializable structs.
             "core.new_rpc" => {
-                let args: NewRpcRequest = match serde_json::from_value(rpc_call.args.clone()) {
+                println!("#sirver rpc_call.args: {:#?}", rpc_call.args);
+                let args: NewRpcRequest = match serde_json::from_value(rpc_call.args) {
                     Ok(args) => args,
-                    // NOCOM(#sirver): report errors somehow?
-                    Err(_) => panic!("Invalid arguments"),
+                    Err(err) => return Some(rpc::Result::Err(err.into())),
                 };
 
+                println!("#sirver ALIVE {}:{}", file!(), line!());
                 self.commands.send(
-                    server::Command::NewRpc(caller, args.name, args.priority)).unwrap();
-                rpc::Result::success(())
+                    server::Command::NewRpc(caller, rpc_call.context, args.name, args.priority)).unwrap();
+                println!("#sirver ALIVE {}:{}", file!(), line!());
+                None
             },
             // NOCOM(#sirver): this should not panic, but return an error.
             _ => panic!("{} was called, but is not a core function.", rpc_call.function),

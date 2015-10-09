@@ -10,8 +10,11 @@ use ::plugin_core;
 use ::plugin_list_files;
 use ::rpc;
 use mio;
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use serde_json;
+use std::collections::Bound::{Included, Unbounded};
+use std::collections::btree_map;
+use std::collections::hash_map;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Sender, Receiver};
@@ -24,7 +27,7 @@ const CORE_FUNCTIONS_PREFIX: &'static str = "core.";
 
 pub enum Command {
     Quit,
-    NewRpc(ipc_bridge::ClientId, String, u16),
+    NewRpc(ipc_bridge::ClientId, String, String, u16),
     RpcCall(ipc_bridge::ClientId, rpc::Call),
     RpcResponse(rpc::Response),
     RpcCancel(rpc::Cancel),
@@ -45,10 +48,11 @@ struct RunningRpc {
     caller: ipc_bridge::ClientId,
     rpc_call: rpc::Call,
     last_index: usize,
+    matching_rpc_names: Vec<String>,
 }
 
 pub struct Swiboe {
-    functions: HashMap<String, Vec<RegisteredFunction>>,
+    functions: BTreeMap<String, RegisteredFunction>,
     commands: Receiver<Command>,
     clients: HashSet<ipc_bridge::ClientId>,
     ipc_bridge_commands: mio::Sender<ipc_bridge::Command>,
@@ -61,23 +65,34 @@ impl Swiboe {
         while let Ok(command) = self.commands.recv() {
             match command {
                 Command::Quit => break,
-                Command::NewRpc(client_id, name, priority) => {
+                Command::NewRpc(client_id, rpc_call_context, name, priority) => {
                     // NOCOM(#sirver): deny everything starting with 'core'
                     // NOCOM(#sirver): make sure the client_id is known.
                     // NOCOM(#sirver): make sure the client has not already registered this
                     // function.
-                    let vec = self.functions.entry(name)
-                        .or_insert(Vec::new());
-
-                    let index = match vec.binary_search_by(|probe| probe.priority.cmp(&priority)) {
-                        Ok(idx) => idx,
-                        Err(idx) => idx,
+                    let result = match self.functions.entry(name) {
+                        btree_map::Entry::Vacant(entry) => {
+                            let vec = entry.insert(
+                                RegisteredFunction {
+                                    client_id: client_id,
+                                    priority: priority,
+                                });
+                            rpc::Result::success(())
+                        },
+                        btree_map::Entry::Occupied(_) => {
+                            rpc::Result::Err(
+                                rpc::Error {
+                                    kind: rpc::ErrorKind::InvalidArgs,
+                                    details: serde_json::from_str("\"rpc_name_already_used\"").unwrap(),
+                                })
+                        },
                     };
-
-                    vec.insert(index, RegisteredFunction {
-                        client_id: client_id,
-                        priority: priority,
-                    });
+                    try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
+                                client_id,
+                                ipc::Message::RpcResponse(rpc::Response {
+                                    context: rpc_call_context,
+                                    kind: rpc::ResponseKind::Last(result),
+                                }))));
                 },
                 Command::RpcCall(client_id, rpc_call) => {
                     // NOCOM(#sirver): make sure this is not already in running_rpcs.
@@ -85,42 +100,58 @@ impl Swiboe {
 
                     // Special case 'core.'. We handle them immediately.
                     if rpc_call.function.starts_with(CORE_FUNCTIONS_PREFIX) {
-                        let result = self.plugin_core.call(client_id, &rpc_call);
-                        try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
-                                client_id,
-                                ipc::Message::RpcResponse(rpc::Response {
-                                    context: rpc_call.context.clone(),
-                                    kind: rpc::ResponseKind::Last(result),
-                                }))));
-                    } else {
-                        match self.functions.get(&rpc_call.function as &str) {
-                            Some(vec) => {
-                                let function = &vec[0];
-                                // NOCOM(#sirver): eventually, when we keep proper track of our rpc calls, this should be
-                                // able to move again.
-                                self.running_rpcs.insert(rpc_call.context.clone(), RunningRpc {
-                                    last_index: 0,
-                                    rpc_call: rpc_call.clone(),
-                                    caller: client_id,
-                                });
-                                try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
-                                        function.client_id,
-                                        ipc::Message::RpcCall(rpc_call)
-                                        )));
-                                // NOCOM(#sirver): we ignore timeouts.
-                            },
-                            None => {
-                                try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
+                        let context = rpc_call.context.clone();
+                        let result = self.plugin_core.call(client_id, rpc_call);
+                        // NOCOM(#sirver): that feels just plain silly. why even return a result?
+                        if let Some(result) = result {
+                            try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
                                         client_id,
                                         ipc::Message::RpcResponse(rpc::Response {
-                                            context: rpc_call.context.clone(),
-                                            kind: rpc::ResponseKind::Last(rpc::Result::Err(rpc::Error {
-                                                kind: rpc::ErrorKind::UnknownRpc,
-                                                details: None,
-                                            })),
+                                            context: context,
+                                            kind: rpc::ResponseKind::Last(result),
                                         }))));
-                            }
                         }
+                    } else {
+                        // let matching_rpcs = Vec::new();
+                        // NOCOM(#sirver): hier gehts weiter. keine ahnung wie.
+                        let search = "hi".to_string();
+                        let it = self.functions.range(Included(&search), Unbounded);
+                        // for (&name, &function) in  {
+                            // if !name.starts_with(&rpc_call.function) {
+                                // break;
+                            // }
+                            // // matching_rpcs.push(function);
+                        // }
+                        // matching_rpcs.sort_by(|a, b| { a.priority.cmp(&b.priority) });
+
+                        // match self.functions.get(&rpc_call.function as &str) {
+                            // Some(vec) => {
+                                // let function = &vec[0];
+                                // // NOCOM(#sirver): eventually, when we keep proper track of our rpc calls, this should be
+                                // // able to move again.
+                                // self.running_rpcs.insert(rpc_call.context.clone(), RunningRpc {
+                                    // last_index: 0,
+                                    // rpc_call: rpc_call.clone(),
+                                    // caller: client_id,
+                                // });
+                                // try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
+                                        // function.client_id,
+                                        // ipc::Message::RpcCall(rpc_call)
+                                        // )));
+                                // // NOCOM(#sirver): we ignore timeouts.
+                            // },
+                            // None => {
+                                // try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
+                                        // client_id,
+                                        // ipc::Message::RpcResponse(rpc::Response {
+                                            // context: rpc_call.context.clone(),
+                                            // kind: rpc::ResponseKind::Last(rpc::Result::Err(rpc::Error {
+                                                // kind: rpc::ErrorKind::UnknownRpc,
+                                                // details: None,
+                                            // })),
+                                        // }))));
+                            // }
+                        // }
                     }
                 },
                 Command::RpcResponse(rpc_response) => {
@@ -168,18 +199,19 @@ impl Swiboe {
                     }
 
                     // Kill all functions that have been registered by this.
-                    let mut functions_to_remove = Vec::new();
-                    for (function_name, registered_functions) in &mut self.functions {
-                        registered_functions.retain(|registered_function| {
-                            registered_function.client_id != client_id
-                        });
-                        if registered_functions.is_empty() {
-                            functions_to_remove.push(function_name.to_string());
-                        }
-                    }
-                    for function_name in functions_to_remove {
-                        self.functions.remove(&function_name);
-                    }
+                    // NOCOM(#sirver): figure that out again.
+                    // let mut functions_to_remove = Vec::new();
+                    // for (function_name, registered_functions) in &mut self.functions {
+                        // registered_functions.retain(|registered_function| {
+                            // registered_function.client_id != client_id
+                        // });
+                        // if registered_functions.is_empty() {
+                            // functions_to_remove.push(function_name.to_string());
+                        // }
+                    // }
+                    // for function_name in functions_to_remove {
+                        // self.functions.remove(&function_name);
+                    // }
                 }
             }
         };
@@ -187,41 +219,42 @@ impl Swiboe {
     }
 
     fn on_rpc_cancel(&mut self, rpc_cancel: rpc::Cancel) -> Result<()> {
-        let running_rpc = match self.running_rpcs.entry(rpc_cancel.context.clone()) {
-            Entry::Occupied(running_rpc) => running_rpc,
-            Entry::Vacant(_) => {
-                // Unknown RPC. We simply drop this message.
-                return Ok(());
-            }
-        };
+        unimplemented!();
+        // let running_rpc = match self.running_rpcs.entry(rpc_cancel.context.clone()) {
+            // hash_map::Entry::Occupied(running_rpc) => running_rpc,
+            // hash_map::Entry::Vacant(_) => {
+                // // Unknown RPC. We simply drop this message.
+                // return Ok(());
+            // }
+        // };
 
-        // NOCOM(#sirver): only the original caller can cancel, really.
-        let running_rpc = running_rpc.remove();
-        match {
-            // NOCOM(#sirver): quite some code duplication with RpcCall
-            self.functions.get(&running_rpc.rpc_call.function as &str).and_then(|vec| {
-                vec.get(running_rpc.last_index)
-            })
-        } {
-            Some(function) => {
-                // NOCOM(#sirver): eventually, when we keep proper track of our rpc calls, this should be
-                // able to move again.
-                try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
-                        function.client_id,
-                        ipc::Message::RpcCancel(rpc_cancel)
-                        )));
-            },
-            None => {
-                // NOCOM(#sirver): Wait what... nothing to cancel?
-            }
-        };
-        Ok(())
+        // // NOCOM(#sirver): only the original caller can cancel, really.
+        // let running_rpc = running_rpc.remove();
+        // match {
+            // // NOCOM(#sirver): quite some code duplication with RpcCall
+            // self.functions.get(&running_rpc.rpc_call.function as &str).and_then(|vec| {
+                // vec.get(running_rpc.last_index)
+            // })
+        // } {
+            // Some(function) => {
+                // // NOCOM(#sirver): eventually, when we keep proper track of our rpc calls, this should be
+                // // able to move again.
+                // try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
+                        // function.client_id,
+                        // ipc::Message::RpcCancel(rpc_cancel)
+                        // )));
+            // },
+            // None => {
+                // // NOCOM(#sirver): Wait what... nothing to cancel?
+            // }
+        // };
+        // Ok(())
     }
 
     fn on_rpc_response(&mut self, rpc_response: rpc::Response) -> Result<()> {
         let mut running_rpc = match self.running_rpcs.entry(rpc_response.context.clone()) {
-            Entry::Occupied(running_rpc) => running_rpc,
-            Entry::Vacant(_) => {
+            hash_map::Entry::Occupied(running_rpc) => running_rpc,
+            hash_map::Entry::Vacant(_) => {
                 // Unknown RPC. We simply drop this message.
                 return Ok(());
             }
@@ -250,36 +283,37 @@ impl Swiboe {
                             }))));
                 },
                 rpc::Result::NotHandled => {
-                    // TODO(sirver): If a new function has been registered or been deleted since we
-                    // last saw this context, this might skip a handler or call one twice. We need
-                    // a better way to keep track where we are in the list of handlers.
-                    let running_rpc = running_rpc.get_mut();
+                    unimplemented!();
+                    // // TODO(sirver): If a new function has been registered or been deleted since we
+                    // // last saw this context, this might skip a handler or call one twice. We need
+                    // // a better way to keep track where we are in the list of handlers.
+                    // let running_rpc = running_rpc.get_mut();
 
 
-                    running_rpc.last_index += 1;
-                    match {
-                        // NOCOM(#sirver): quite some code duplication with RpcCall
-                        self.functions.get(&running_rpc.rpc_call.function as &str).and_then(|vec| {
-                            vec.get(running_rpc.last_index)
-                        })
-                    } {
-                        Some(function) => {
-                            // NOCOM(#sirver): eventually, when we keep proper track of our rpc calls, this should be
-                            // able to move again.
-                            try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
-                                    function.client_id,
-                                    ipc::Message::RpcCall(running_rpc.rpc_call.clone())
-                                    )));
-                        },
-                        None => {
-                            try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
-                                    running_rpc.caller,
-                                    ipc::Message::RpcResponse(rpc::Response {
-                                        context: running_rpc.rpc_call.context.clone(),
-                                        kind: rpc::ResponseKind::Last(rpc::Result::NotHandled),
-                                    }))));
-                        }
-                    };
+                    // running_rpc.last_index += 1;
+                    // match {
+                        // // NOCOM(#sirver): quite some code duplication with RpcCall
+                        // self.functions.get(&running_rpc.rpc_call.function as &str).and_then(|vec| {
+                            // vec.get(running_rpc.last_index)
+                        // })
+                    // } {
+                        // Some(function) => {
+                            // // NOCOM(#sirver): eventually, when we keep proper track of our rpc calls, this should be
+                            // // able to move again.
+                            // try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
+                                    // function.client_id,
+                                    // ipc::Message::RpcCall(running_rpc.rpc_call.clone())
+                                    // )));
+                        // },
+                        // None => {
+                            // try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
+                                    // running_rpc.caller,
+                                    // ipc::Message::RpcResponse(rpc::Response {
+                                        // context: running_rpc.rpc_call.context.clone(),
+                                        // kind: rpc::ResponseKind::Last(rpc::Result::NotHandled),
+                                    // }))));
+                        // }
+                    // };
                     // NOCOM(#sirver): we ignore timeouts.
                 }
             },
@@ -317,7 +351,7 @@ impl Server {
         };
 
         let mut swiboe = Swiboe {
-            functions: HashMap::new(),
+            functions: BTreeMap::new(),
             clients: HashSet::new(),
             running_rpcs: HashMap::new(),
             commands: rx,
@@ -342,10 +376,13 @@ impl Server {
             }
         }));
 
+        println!("#sirver ALIVE {}:{}", file!(), line!());
         server.buffer_plugin = Some(
             try!(plugin_buffer::BufferPlugin::new(&server.unix_domain_socket_name)));
+        println!("#sirver ALIVE {}:{}", file!(), line!());
         server.list_files_plugin = Some(
             try!(plugin_list_files::ListFilesPlugin::new(&server.unix_domain_socket_name)));
+        println!("#sirver ALIVE {}:{}", file!(), line!());
         Ok(server)
     }
 

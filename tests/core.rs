@@ -61,7 +61,7 @@ fn new_rpc_simple() {
     let mut client1 = client::Client::connect_unix(&t.socket_name).unwrap();
     let mut client2 = client::Client::connect_unix(&t.socket_name).unwrap();
 
-    let test_msg: serde_json::Value = as_json(r#"{ "blub": "blah" }"#);
+    let test_msg = as_json(r#"{ "blub": "blah" }"#);
 
     client1.new_rpc("test.test", Box::new(TestCall {
         priority: 0,
@@ -70,6 +70,16 @@ fn new_rpc_simple() {
 
     let mut rpc = client2.call("test.test", &test_msg).unwrap();
     assert_eq!(rpc.wait().unwrap(), rpc::Result::Ok(test_msg));
+}
+
+#[test]
+fn new_rpc_invalid_args() {
+    let t = TestHarness::new();
+
+    let mut client = client::Client::connect_unix(&t.socket_name).unwrap();
+    let args = as_json("{}");
+    let result = client.call("core.new_rpc", &args).unwrap().wait().unwrap();
+    assert_eq!(rpc::ErrorKind::InvalidArgs, result.unwrap_err().kind);
 }
 
 #[test]

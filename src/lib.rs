@@ -19,11 +19,11 @@ extern crate uuid;
 
 #[macro_export]
 macro_rules! try_rpc {
-    ($sender:ident, $expr:expr) => (match $expr {
+    ($context:ident, $expr:expr) => (match $expr {
         Ok(val) => val,
         Err(err) => {
             // TODO(sirver): Not sure if unwrap() here is okay.
-            $sender.finish($crate::rpc::Result::Err(convert::From::from(err))).unwrap();
+            $context.finish($crate::rpc::Result::Err(::std::convert::From::from(err))).unwrap();
             return;
         }
     })
