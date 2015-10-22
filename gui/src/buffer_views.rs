@@ -13,7 +13,7 @@ use std::sync::mpsc;
 use std::sync::{RwLock, Arc, Mutex};
 use swiboe::client::RpcCaller;
 use swiboe::client;
-use swiboe::plugin_buffer;
+use swiboe::plugin_buffer::{self, Position};
 use swiboe::rpc;
 use swiboe;
 use uuid::Uuid;
@@ -62,26 +62,6 @@ impl client::rpc::server::Rpc for Scroll {
 
         let response = ScrollResponse;
         context.finish(rpc::Result::success(response)).unwrap();
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
-pub struct Position {
-    /// 0 based line index into the buffer.
-    pub line_index: isize,
-
-    /// 0 based glyph index into the line. A multibyte character only counts as one here.
-    pub column_index: isize,
-}
-
-impl ops::Add for Position {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self {
-        Position {
-            line_index: self.line_index + rhs.line_index,
-            column_index: self.column_index + rhs.column_index,
-        }
     }
 }
 

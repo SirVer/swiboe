@@ -17,6 +17,49 @@ use std::result;
 use std::string;
 use std::sync::{RwLock, Arc};
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
+pub struct Position {
+    /// 0 based line index into the buffer.
+    pub line_index: isize,
+
+    /// 0 based glyph index into the line. A multibyte character only counts as one here.
+    pub column_index: isize,
+}
+
+impl ops::Add for Position {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self {
+        Position {
+            line_index: self.line_index + rhs.line_index,
+            column_index: self.column_index + rhs.column_index,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct AddInformation {
+    /// Text to add starting at 'start'. This text should not contain line breaks, so each
+    /// line change needs a separate addition action.
+    pub text: String,
+    pub start: Position,
+}
+
+// TODO(sirver): Add Change and Delete in here.
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub enum EditActionKind {
+    Add(AddInformation),
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct EditAction {
+    /// The buffer revision before the add is done.
+    pub buffer_revision: u64,
+
+    // TODO(sirver): take a list of edit actions instead.
+    pub action: EditActionKind,
+}
+
 struct New {
     buffers: Arc<RwLock<BuffersManager>>,
 }
@@ -158,6 +201,33 @@ impl client::rpc::server::Rpc for GetContent {
         context.finish(rpc::Result::success(response)).unwrap();
     }
 }
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct EditRequest {
+    pub buffer_index: usize,
+    pub edit_action: EditAction,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct EditResponse;
+
+struct Edit {
+    buffers: Arc<RwLock<BuffersManager>>,
+}
+
+impl client::rpc::server::Rpc for Edit {
+    fn call(&self, mut context: client::rpc::server::Context, args: serde_json::Value) {
+        // NOCOM(#sirver): implement this
+        let request: EditRequest = try_rpc!(context, serde_json::from_value(args));
+        // let buffers = self.buffers.read().unwrap();
+
+        // let buffer = try_rpc!(context, buffers.get(request.buffer_index));
+
+        let response = EditResponse;
+        context.finish(rpc::Result::success(response)).unwrap();
+    }
+}
+
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct OpenRequest {
@@ -329,6 +399,9 @@ impl BufferPlugin {
 
         let list = Box::new(List { buffers: plugin.buffers.clone() });
         try!(plugin.client.new_rpc("buffer.list", list));
+
+        let edit = Box::new(Edit { buffers: plugin.buffers.clone() });
+        try!(plugin.client.new_rpc("buffer.edit", edit));
 
         Ok(plugin)
     }

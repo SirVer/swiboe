@@ -12,7 +12,7 @@ use swiboe::rpc;
 use swiboe::testing::TestHarness;
 
 fn wait_for_true_with_timeout(mutex: &Mutex<bool>) -> bool {
-    for _ in (0..10) {
+    for _ in 0..10 {
         if *mutex.lock().unwrap() {
             return true;
         }
@@ -65,6 +65,36 @@ fn buffer_new_with_content() {
     assert_eq!(rpc.wait().unwrap(), rpc::Result::success(plugin_buffer::GetContentResponse {
         content: content.into(),
     }));
+}
+
+#[test]
+fn buffer_edit_add() {
+    let t = TestHarness::new();
+    let mut client = client::Client::connect_unix(&t.socket_name).unwrap();
+
+    let content = "blub\nblah\nbli";
+    create_buffer(&mut client, 0, Some(content));
+
+    let edit_action = plugin_buffer::EditAction {
+        buffer_revision: 0,
+        action: plugin_buffer::EditActionKind::Add(plugin_buffer::AddInformation {
+            text: "Hello world".into(),
+            start: plugin_buffer::Position {
+                line_index: 0,
+                column_index: 0,
+            },
+        })
+    } ;
+
+    let mut rpc = client.call("buffer.edit", &plugin_buffer::EditRequest {
+        buffer_index: 0,
+        edit_action: edit_action,
+    }).unwrap();
+
+
+    // NOCOM(#sirver): check that the result of the RPC and the content of the buffer changed as
+    // expected.
+    assert!(rpc.wait().unwrap().is_ok());
 }
 
 #[test]
