@@ -194,7 +194,6 @@ impl client::rpc::server::Rpc for GetContent {
         let buffers = self.buffers.read().unwrap();
 
         let buffer = try_rpc!(context, buffers.get(request.buffer_index));
-
         let response = GetContentResponse {
             content: buffer.to_string(),
         };
@@ -219,9 +218,38 @@ impl client::rpc::server::Rpc for Edit {
     fn call(&self, mut context: client::rpc::server::Context, args: serde_json::Value) {
         // NOCOM(#sirver): implement this
         let request: EditRequest = try_rpc!(context, serde_json::from_value(args));
-        // let buffers = self.buffers.read().unwrap();
+        let mut buffers = self.buffers.write().unwrap();
 
-        // let buffer = try_rpc!(context, buffers.get(request.buffer_index));
+        let buffer = try_rpc!(context, buffers.get_mut(request.buffer_index));
+
+        let mut new_content = String::new();
+        // NOCOM(#sirver): need to check the revision the buffer is currently add.
+        match request.edit_action.action {
+            EditActionKind::Add(add) => {
+                // TODO(sirver): This is really slow for big buffers. We need random access to the lines.
+                let lines: Vec<&str> = buffer.content.lines().collect();
+                new_content.push_str(&lines[0..add.start.line_index as usize].join("\n"));
+                let line = lines[add.start.line_index as usize];
+                new_content.push('\n');
+                let mut chars = line.chars();
+
+                // NOCOM(#sirver): not elegant. does this not go shorter?
+                for _ in 0..add.start.column_index {
+                    // NOCOM(#sirver): this is unsafe. maybe the line is shorter
+                    new_content.push(chars.next().unwrap());
+                }
+                new_content.push_str(&add.text);
+
+                for c in chars {
+                    new_content.push(c);
+                }
+                new_content.push('\n');
+
+                new_content.push_str(&lines[add.start.line_index as usize +1..].join("\n"));
+            }
+        }
+
+        buffer.content = new_content;
 
         let response = EditResponse;
         context.finish(rpc::Result::success(response)).unwrap();
@@ -357,6 +385,11 @@ impl BuffersManager {
 
     fn get(&self, index: usize) -> result::Result<&Buffer, BufferError> {
         let buffer = try!(self.buffers.get(&index).ok_or(BufferError::UnknownBuffer));
+        Ok(buffer)
+    }
+
+    fn get_mut(&mut self, index: usize) -> result::Result<&mut Buffer, BufferError> {
+        let buffer = try!(self.buffers.get_mut(&index).ok_or(BufferError::UnknownBuffer));
         Ok(buffer)
     }
 }

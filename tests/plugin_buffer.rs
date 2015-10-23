@@ -3,6 +3,7 @@
 // in the project root for license information.
 
 use ::{CallbackRpc, create_file};
+use serde_json;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use swiboe::client::RpcCaller;
@@ -19,6 +20,16 @@ fn wait_for_true_with_timeout(mutex: &Mutex<bool>) -> bool {
         thread::sleep_ms(50);
     }
     false
+}
+
+fn get_content(client: &mut client::Client, buffer_index: usize) -> String {
+    let mut rpc = client.call("buffer.get_content", &plugin_buffer::GetContentRequest {
+        buffer_index: buffer_index,
+    }).unwrap();
+
+    let result: rpc::Result = rpc.wait().unwrap();
+    let response: plugin_buffer::GetContentResponse = serde_json::from_value(result.unwrap()).unwrap();
+    response.content
 }
 
 fn create_buffer(client: &mut client::Client, expected_index: usize, content: Option<&str>) {
@@ -84,17 +95,16 @@ fn buffer_edit_add() {
                 column_index: 0,
             },
         })
-    } ;
+    };
 
     let mut rpc = client.call("buffer.edit", &plugin_buffer::EditRequest {
         buffer_index: 0,
         edit_action: edit_action,
     }).unwrap();
-
-
-    // NOCOM(#sirver): check that the result of the RPC and the content of the buffer changed as
-    // expected.
     assert!(rpc.wait().unwrap().is_ok());
+
+    let new_content = get_content(&mut client, 0);
+    assert_eq!("Hello world\nblub\nblah\nbli", new_content);
 }
 
 #[test]
