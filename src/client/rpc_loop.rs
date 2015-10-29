@@ -56,7 +56,8 @@ impl RpcLoop {
                 Command::Received(message) => {
                     match message {
                         ::ipc::Message::RpcCall(rpc_call) => {
-
+                            println!("#sirver rpc_call.function: {:#?}", rpc_call.function);
+                            println!("#sirver self.remote_procedures.len(): {:#?}", self.remote_procedures.len());
                             if let Some(function) = self.remote_procedures.get(&rpc_call.function) {
                                 let (tx, rx) = mpsc::channel();
                                 self.running_rpc_calls.insert(rpc_call.context.clone(), RunningRpc::new(tx));

@@ -46,8 +46,8 @@ struct RegisteredFunction {
 #[derive(Debug)]
 struct RunningRpc {
     caller: ipc_bridge::ClientId,
-    rpc_call: rpc::Call,
-    last_index: usize,
+    args: serde_json::Value,
+    last_index: isize,
     matching_rpc_names: Vec<String>,
 }
 
@@ -112,46 +112,43 @@ impl Swiboe {
                                         }))));
                         }
                     } else {
-                        // let matching_rpcs = Vec::new();
-                        // NOCOM(#sirver): hier gehts weiter. keine ahnung wie.
-                        let search = "hi".to_string();
-                        let it = self.functions.range(Included(&search), Unbounded);
-                        // for (&name, &function) in  {
-                            // if !name.starts_with(&rpc_call.function) {
-                                // break;
-                            // }
-                            // // matching_rpcs.push(function);
-                        // }
-                        // matching_rpcs.sort_by(|a, b| { a.priority.cmp(&b.priority) });
+                        let matching_rpc_names: Vec<String> = {
+                           let mut matching_rpcs = Vec::new();
+                            let it: btree_map::Range<String, RegisteredFunction> =
+                                self.functions.range(Included(&rpc_call.function), Unbounded::<&str>);
+                            // NOCOM(#sirver): drop type and inline?
+                            for (name, function) in it  {
+                                if !name.starts_with(&rpc_call.function) {
+                                    break;
+                                }
+                                matching_rpcs.push((function.priority, name));
+                            }
+                            // NOCOM(#sirver): is this sorting correct?
+                            matching_rpcs.sort_by(|a, b| { a.0.cmp(&b.0) });
+                            matching_rpcs.iter().map(|e| e.1.to_string()).collect()
+                        };
 
-                        // match self.functions.get(&rpc_call.function as &str) {
-                            // Some(vec) => {
-                                // let function = &vec[0];
-                                // // NOCOM(#sirver): eventually, when we keep proper track of our rpc calls, this should be
-                                // // able to move again.
-                                // self.running_rpcs.insert(rpc_call.context.clone(), RunningRpc {
-                                    // last_index: 0,
-                                    // rpc_call: rpc_call.clone(),
-                                    // caller: client_id,
-                                // });
-                                // try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
-                                        // function.client_id,
-                                        // ipc::Message::RpcCall(rpc_call)
-                                        // )));
-                                // // NOCOM(#sirver): we ignore timeouts.
-                            // },
-                            // None => {
-                                // try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
-                                        // client_id,
-                                        // ipc::Message::RpcResponse(rpc::Response {
-                                            // context: rpc_call.context.clone(),
-                                            // kind: rpc::ResponseKind::Last(rpc::Result::Err(rpc::Error {
-                                                // kind: rpc::ErrorKind::UnknownRpc,
-                                                // details: None,
-                                            // })),
-                                        // }))));
-                            // }
-                        // }
+                        if matching_rpc_names.is_empty() {
+                            try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
+                                        client_id,
+                                        ipc::Message::RpcResponse(rpc::Response {
+                                            context: rpc_call.context.clone(),
+                                            kind: rpc::ResponseKind::Last(rpc::Result::Err(rpc::Error {
+                                                kind: rpc::ErrorKind::UnknownRpc,
+                                                details: None,
+                                            })),
+                                        }))));
+
+                        } else {
+                            let mut running_rpc = RunningRpc {
+                                caller: client_id.clone(),
+                                args: rpc_call.args,
+                                last_index: -1,
+                                matching_rpc_names: matching_rpc_names,
+                            };
+                            self.running_rpcs.insert(rpc_call.context.clone(), running_rpc);
+                            self.call_next_implementor(&rpc_call.context);
+                        }
                     }
                 },
                 Command::RpcResponse(rpc_response) => {
@@ -252,6 +249,7 @@ impl Swiboe {
     }
 
     fn on_rpc_response(&mut self, rpc_response: rpc::Response) -> Result<()> {
+        // NOCOM(#sirver): use get() instead.
         let mut running_rpc = match self.running_rpcs.entry(rpc_response.context.clone()) {
             hash_map::Entry::Occupied(running_rpc) => running_rpc,
             hash_map::Entry::Vacant(_) => {
@@ -266,7 +264,7 @@ impl Swiboe {
                 try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
                         running_rpc.caller,
                         ipc::Message::RpcResponse(rpc::Response {
-                            context: running_rpc.rpc_call.context.clone(),
+                            context: rpc_response.context,
                             kind: rpc::ResponseKind::Partial(value),
                         }))));
             },
@@ -276,7 +274,7 @@ impl Swiboe {
                     try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
                             running_rpc.caller,
                             ipc::Message::RpcResponse(rpc::Response {
-                                context: running_rpc.rpc_call.context,
+                                context: rpc_response.context,
                                 kind: rpc::ResponseKind::Last(
                                     result
                                 ),
@@ -320,6 +318,35 @@ impl Swiboe {
         };
         Ok(())
     }
+
+
+    fn call_next_implementor(&mut self, context: &str) -> Result<()> {
+        let mut running_rpc = self.running_rpcs.get_mut(context)
+            .expect("call_next_implementor: Expected the RPC to still run.");
+
+        while running_rpc.last_index < running_rpc.matching_rpc_names.len() as isize {
+            running_rpc.last_index += 1;
+            let function = &running_rpc.matching_rpc_names[running_rpc.last_index as usize];
+            if let Some(registered_function) = self.functions.get(function) {
+                let client_rpc_call = rpc::Call {
+                    function: function.to_string(),
+                    context: context.to_string(),
+                    args: running_rpc.args.clone(),
+                };
+
+                try!(self.ipc_bridge_commands.send(ipc_bridge::Command::SendData(
+                            registered_function.client_id,
+                            ipc::Message::RpcCall(client_rpc_call)
+                            )));
+                return Ok(());
+            }
+        }
+
+        // NOCOM(#sirver): This is not okay - there was no next implementor. This RPC is done.
+        Ok(())
+        // NOCOM(#sirver): we ignore timeouts.
+    }
+
 }
 
 pub struct Server {

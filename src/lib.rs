@@ -2,8 +2,12 @@
 // Licensed under the Apache License, Version 2.0. See LICENSE.txt
 // in the project root for license information.
 
-#![feature(custom_derive, plugin)]
+#![feature(btree_range)]
+#![feature(collections)]
+#![feature(collections_bound)]
+#![feature(custom_derive)]
 #![feature(drain)]
+#![feature(plugin)]
 #![feature(read_exact)]
 #![plugin(serde_macros)]
 

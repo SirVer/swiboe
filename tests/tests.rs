@@ -16,7 +16,9 @@ use swiboe::client;
 use swiboe::testing;
 
 mod core;
-mod plugin_buffer;
+
+// NOCOM(#sirver): bring this back
+// mod plugin_buffer;
 
 pub struct CallbackRpc<F> {
     pub priority: u16,

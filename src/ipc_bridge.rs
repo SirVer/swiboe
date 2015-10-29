@@ -178,7 +178,7 @@ impl mio::Handler for IpcBridge {
                         if conn.client_id != receiver {
                             Err(Error::Disconnected)
                         } else {
-                            // println!("Server -> {:?}: {:#?}", receiver, message);
+                            println!("Server -> {:?}: {:#?}", receiver, message);
                             let mut writer = conn.writer.lock().unwrap();
                             writer.queue_message(&message);
                             Ok(())
@@ -238,7 +238,7 @@ impl mio::Handler for IpcBridge {
                                     Err(err) => panic!("Error while reading: {}", err),
                                     Ok(None) => break,
                                     Ok(Some(message)) => {
-                                        // println!("{:?} -> Server: {:#?}", client_id, message);
+                                        println!("{:?} -> Server: {:#?}", client_id, message);
                                         match message {
                                             // NOCOM(#sirver): pack them together in one message?
                                             // NOCOM(#hrapp): that can actually also fail since the

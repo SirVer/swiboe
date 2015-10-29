@@ -12,7 +12,7 @@ use swiboe::rpc;
 use swiboe::testing::TestHarness;
 
 fn wait_for_true_with_timeout(mutex: &Mutex<bool>) -> bool {
-    for _ in (0..10) {
+    for _ in 0..10 {
         if *mutex.lock().unwrap() {
             return true;
         }
