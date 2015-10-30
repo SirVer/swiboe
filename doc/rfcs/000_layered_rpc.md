@@ -32,9 +32,9 @@ or if another plugin should get a chance to handle it.
 
 ## Registering an RPC
 
-An RPC has a unique `id` and a 16 bit unsigned integer `priority`. The `id`
-consists of a dot-separated `name` component and an `implementor` component that
-starts with a `:`. So these are valid `id`s.
+An RPC has a unique `identifier` and a 16 bit unsigned integer `priority`. The
+`identifier` consists of a dot-separated `name` component and an `implementor`
+component that starts with a `:`. So these are valid `identifier`s.
 
 - `buffer.create:core`
 - `on.cursor.moved:ssh_plugin`
@@ -57,12 +57,12 @@ that `foo` implementation should go before `bar` implementation. This introduces
 stronger ties between plugins though and makes (for example) renaming of RPCs
 hard.
 
-Plugins can register an RPC with an `id` and a `priority` with Swiboe by calling
+Plugins can register an RPC with an `identifier` and a `priority` with Swiboe by calling
 `core.new_rpc` RPC.
 
 ## Calling an RPC
 
-An RPC gets called by a caller either with a full `id` which can only match
+An RPC gets called by a caller either with a full `identifier` which can only match
 one or zero RPCs or with a `selector` that matches an arbitrary number of RPCs.
 A `selector` is the prefix of a `name`. For example
 

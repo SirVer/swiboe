@@ -9,10 +9,12 @@
 #![feature(drain)]
 #![feature(plugin)]
 #![feature(read_exact)]
+#![plugin(regex_macros)]
 #![plugin(serde_macros)]
 
 extern crate libc;
 extern crate mio;
+extern crate regex;
 extern crate serde;
 extern crate serde_json;
 extern crate tempdir;
@@ -41,6 +43,7 @@ pub mod plugin_buffer;
 pub mod plugin_core;
 pub mod plugin_list_files;
 pub mod rpc;
+pub mod rpc_id;
 pub mod server;
 pub mod testing;
 

@@ -73,15 +73,15 @@ fn new_rpc_simple() {
 }
 
 // NOCOM(#sirver): bring all these tests back.
-// #[test]
-// fn new_rpc_invalid_args() {
-    // let t = TestHarness::new();
+#[test]
+fn new_rpc_invalid_args() {
+    let t = TestHarness::new();
 
-    // let mut client = client::Client::connect_unix(&t.socket_name).unwrap();
-    // let args = as_json("{}");
-    // let result = client.call("core.new_rpc", &args).unwrap().wait().unwrap();
-    // assert_eq!(rpc::ErrorKind::InvalidArgs, result.unwrap_err().kind);
-// }
+    let mut client = client::Client::connect_unix(&t.socket_name).unwrap();
+    let args = as_json("{}");
+    let result = client.call("core.new_rpc", &args).unwrap().wait().unwrap();
+    assert_eq!(rpc::ErrorKind::InvalidArgs, result.unwrap_err().kind);
+}
 
 // #[test]
 // fn new_rpc_with_priority() {

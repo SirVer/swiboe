@@ -21,6 +21,7 @@ pub enum Error {
     JsonParsing(serde_json::error::Error),
     RpcDone,
     InvalidUtf8,
+    InvalidRpcIdentifier,
 }
 
 impl fmt::Display for Error {
@@ -37,6 +38,7 @@ impl error::Error for Error {
           Error::JsonParsing(ref e) => e.description(),
           Error::RpcDone => "RPC is already finished or cancelled.",
           Error::InvalidUtf8 => "Invalid utf-8 string encountered.",
+          Error::InvalidRpcIdentifier => "Invalid RPC identifier. Must be <path.path.path:implementor>.",
       }
   }
 

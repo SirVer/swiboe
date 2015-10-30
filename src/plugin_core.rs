@@ -26,6 +26,7 @@ impl CorePlugin {
 
     pub fn call(&self, caller: ipc_bridge::ClientId, rpc_call: rpc::Call) -> Option<rpc::Result> {
         match &*rpc_call.function as &str {
+            // NOCOM(#sirver): implementor missing.
             "core.exit" => {
                 self.commands.send(server::Command::Quit).unwrap();
                 Some(rpc::Result::success(()))
